@@ -1,24 +1,21 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import com.microsoft.aad.msal4j.ClientCredentialFactory;
-import com.microsoft.aad.msal4j.ClientCredentialParameters;
-import com.microsoft.aad.msal4j.ConfidentialClientApplication;
-import com.microsoft.aad.msal4j.IAuthenticationResult;
-import com.nimbusds.oauth2.sdk.http.HTTPResponse;
-
-import java.io.BufferedReader;
+import com.microsoft.graph.models.extensions.IGraphServiceClient;
+import com.microsoft.graph.models.extensions.User;
+import com.microsoft.graph.requests.extensions.GraphServiceClient;
+import com.microsoft.graph.requests.extensions.IUserCollectionPage;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
-import java.util.concurrent.CompletableFuture;
+import com.microsoft.graph.auth.confidentialClient.ClientCredentialProvider;
+import com.microsoft.graph.auth.enums.NationalCloud;
 
 class ClientCredentialGrant {
 
-    private static String authority;
+    private static String tenant;
     private static String clientId;
     private static String secret;
     private static String scope;
@@ -26,12 +23,29 @@ class ClientCredentialGrant {
     public static void main(String args[]) throws Exception{
 
         setUpSampleData();
+        List<String> scopes = new ArrayList<>(Arrays.asList(scope) );
+        
 
         try {
-            IAuthenticationResult result = getAccessTokenByClientCredentialGrant();
-            String usersListFromGraph = getUsersListFromGraph(result.accessToken());
+            
 
-            System.out.println("Users in the Tenant = " + usersListFromGraph);
+        	ClientCredentialProvider authProvider = new ClientCredentialProvider(
+                    clientId,
+                    scopes,
+                    secret,
+                    tenant,
+                    NationalCloud.Global);
+        	IGraphServiceClient graphClient = GraphServiceClient.builder().authenticationProvider( authProvider ).buildClient();
+
+        	
+        	IUserCollectionPage usersListFromGraph = graphClient.users()
+        		.buildRequest()
+        		.get();
+
+        	System.out.println("Users in the Tenant = ");
+        	for ( User user: usersListFromGraph.getCurrentPage() ) {
+        		System.out.println(user.userPrincipalName);
+        	}
             System.out.println("Press any key to exit ...");
             System.in.read();
 
@@ -42,61 +56,16 @@ class ClientCredentialGrant {
         }
     }
 
-    private static IAuthenticationResult getAccessTokenByClientCredentialGrant() throws Exception {
-
-        ConfidentialClientApplication app = ConfidentialClientApplication.builder(
-                clientId,
-                ClientCredentialFactory.createFromSecret(secret))
-                .authority(authority)
-                .build();
-
-        // With client credentials flows the scope is ALWAYS of the shape "resource/.default", as the
-        // application permissions need to be set statically (in the portal), and then granted by a tenant administrator
-        ClientCredentialParameters clientCredentialParam = ClientCredentialParameters.builder(
-                Collections.singleton(scope))
-                .build();
-
-        CompletableFuture<IAuthenticationResult> future = app.acquireToken(clientCredentialParam);
-        return future.get();
-    }
-
-    private static String getUsersListFromGraph(String accessToken) throws IOException {
-        URL url = new URL("https://graph.microsoft.com/v1.0/users");
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-
-        conn.setRequestMethod("GET");
-        conn.setRequestProperty("Authorization", "Bearer " + accessToken);
-        conn.setRequestProperty("Accept","application/json");
-
-        int httpResponseCode = conn.getResponseCode();
-        if(httpResponseCode == HTTPResponse.SC_OK) {
-
-            StringBuilder response;
-            try(BufferedReader in = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream()))){
-
-                String inputLine;
-                response = new StringBuilder();
-                while (( inputLine = in.readLine()) != null) {
-                    response.append(inputLine);
-                }
-            }
-            return response.toString();
-        } else {
-            return String.format("Connection returned HTTP code: %s with message: %s",
-                    httpResponseCode, conn.getResponseMessage());
-        }
-    }
 
     /**
      * Helper function unique to this sample setting. In a real application these wouldn't be so hardcoded, for example
-     * different users may need different authority endpoints or scopes
+     * different users may need different scopes
      */
     private static void setUpSampleData() throws IOException {
         // Load properties file and set properties used throughout the sample
         Properties properties = new Properties();
         properties.load(Thread.currentThread().getContextClassLoader().getResourceAsStream("application.properties"));
-        authority = properties.getProperty("AUTHORITY");
+        tenant = properties.getProperty("TENANT");
         clientId = properties.getProperty("CLIENT_ID");
         secret = properties.getProperty("SECRET");
         scope = properties.getProperty("SCOPE");
